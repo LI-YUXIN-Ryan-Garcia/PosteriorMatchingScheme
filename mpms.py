@@ -5,11 +5,12 @@ Modified Posterior Matching Scheme with hamming(4,7)
    X1...Xn ---> | Enc | --------> | P = alpha | -------> | Dec |
                 -------            -----------           ------  
                                                            |
-                            Feedback: Y1...Yn              |
+                            Feedback: Y1...Yn + W          |
                         <----------------------------------|
 '''
 
 import numpy as np
+import bigfloat as bf
 from tree import SplayTree
 from pms import PMS
 from hamming import HammingCode
@@ -23,7 +24,6 @@ class MPMS(PMS):
     # return lower bound and upper bound of the prob block to be scaled up
     def find_interval(self, y):
         order = int(y,2)
-        # print("# {} block to be scaled up".format(order))
         n = self.n
         # prob of intervals to be scaled down
         unit_prob = 1 / 2**n
@@ -31,11 +31,11 @@ class MPMS(PMS):
         ub = lb + unit_prob
         return lb, ub
 
-    def channel_transmit(self, U, num_err=0):
-        a = self.errp
+    def channel_transmit(self, U, num_err=None):
+        a = self.XoverP
         u = U
-        n = num_err if num_err != 0 else len(u) # number of error
-        if num_err > len(u):
+        n = num_err if num_err is not None else len(u) # number of error
+        if n > len(u):
             print("Error! The number of error(s) can't be larger than the length of code")
             print("Length of code: {}, number of error(s): {}".format(len(u), num_err))
             exit()
@@ -43,7 +43,7 @@ class MPMS(PMS):
         flags = [True if i in positions else False for i in range(len(u))]
 
         def flip(x, f):
-            p = self.errp
+            p = self.XoverP
             x = int(x)
             if f:
                 return 1 - x if np.random.rand() <= p else x
@@ -52,32 +52,57 @@ class MPMS(PMS):
 
         return ''.join([str(elm) for elm in list(map(flip, u,flags))])
 
-    def transmit(self, msg, numErr=0, rounds=100, converge=True):
-        self.msg = msg
+    # check transmission end
+    def check_ending(self, peak_value):
+        if self.seq is None:
+            if abs(self.value - peak_value) < 1E-9:
+                return True
+            else:
+                return False
+        else:
+            # boundaries of decoded real number 
+            result = self.real_to_bin(peak_value)
+            bin_seq, order= result[0], result[1]
+            l = len(bin_seq)
+            lower_bound, upper_bound = order / 2**l, (order+1) / 2**l
+
+            # bounaries of posterior probability
+            t = self.tree
+            p = self.XoverP
+            low = t.search_node(p, direction=0)
+            upper = t.search_node(1-p, direction=0)
+            if low.start_value >= lower_bound and upper_bound >= upper.start_value:
+                return True
+            else:
+                return False
+
+    def transmit(self, msg, numErr=None, rounds=None):
+        # encode binary sequence to real number if necessary
+        self.msg = self.bin_to_real(msg)
+        print("Message: {}, Pe: {}".format(self.msg, self.XoverP))
         n = self.n
+        self.undecodable = False
 
         print("------ Start Posterior Mathcing Scheme ------")
 
-        target = 0 # target interval
-        while True:
-            if target / 2**n <= msg and (target+1) / 2**n >= msg:
-                break
-            target += 1
+        target = round(self.msg * 2**n) # target interval
         print('Target intervel: {}'.format(target))
 
-        for i in range(rounds):
+        r = rounds if rounds is not None else 500
+        for i in range(r):
+            #print("Round: {}".format(i))
             # encoding message
             self.X = format(target, '{}b'.format(n)).replace(' ', '0')
-            print("X: {}".format(self.X))
+            #print("X: {}".format(self.X))
             
             # hamming encoding:
             h = HammingCode(self.X)
             u = h.genCode() # msg to be send
-            print('Sending U_1:n: {}'.format(u)) 
+            #print('Sending U_1:n: {}'.format(u)) 
 
             # channel transmission:
             v = self.channel_transmit(u, numErr)
-            print('Receive V_1:n: {}'.format(v))
+            #print('Receive V_1:n: {}'.format(v))
 
             # hamming decoding:
             err_pos = h.detectError(v) # reverse order
@@ -87,18 +112,20 @@ class MPMS(PMS):
                 err_pos = len(v) - err_pos
                 lost_bit = 1 if v[err_pos] == '0' else 0 # flip the error bit
                 correct_v = v[:err_pos] + str(lost_bit) + v[err_pos+1:] 
-                print("Correct code: {}".format(correct_v))
+                #print("Correct code: {}".format(correct_v))
                 self.Y = h.decode(correct_v[::-1])
             else:
-                print("Hamming code can't correct error in {}".format(v))
+                #print("Hamming code can't correct error in {}".format(v))
+                self.undecodable = True
                 self.Y = h.decode(v)
+                continue
             
-            print("Y: {}".format(self.Y))
+            #print("Y: {}".format(self.Y))
 
             # update probability, scale up the prob block msg belongs to, and 
             # scale down the other prob block.
             p_lb, p_ub = self.find_interval(self.Y) # prob lower/upper bound
-            print("probability: lower bound {}, upper bound: {}".format(p_lb, p_ub))
+            #print("probability: lower bound {}, upper bound: {}".format(p_lb, p_ub))
 
             '''
                 Divide tree into three parts by lower bound and upper bound: 
@@ -116,15 +143,15 @@ class MPMS(PMS):
                 node_ub = self.tree.search_node(p_ub, 0)
                 self.value = node_ub.start_value
                 self.tree = node_ub.parent.rotate()
-                self.tree.left.p, self.tree.right.p = 1 - self.errp, self.errp
+                self.tree.left.p, self.tree.right.p = 1 - self.XoverP, self.XoverP
             elif p_ub == 1: # last blck, similar to normal PMS
                 node_lb = self.tree.search_node(p_lb, 0)
                 self.value = node_lb.start_value
                 self.tree = node_lb.parent.rotate()
-                self.tree.left.p, self.tree.right.p = self.errp, 1 - self.errp
+                self.tree.left.p, self.tree.right.p = self.XoverP, 1 - self.XoverP
             else:
                 order = int(self.Y,2) # i-th block to be scaled up, starts from 0
-                unit_prob = self.errp / (2**n-1)
+                unit_prob = self.XoverP / (2**n-1)
                 remain = 2**n - 1 - order
 
                 # nodes of lower bound and upper bound
@@ -145,7 +172,7 @@ class MPMS(PMS):
                     sub = self.tree.right
                 else:
                     self.tree = sub
-                sub.left.p = sub.p * (1 - self.errp) / (1 - self.errp + unit_prob * remain)
+                sub.left.p = sub.p * (1 - self.XoverP) / (1 - self.XoverP + unit_prob * remain)
                 sub.right.p = 1 - sub.left.p  
 
             # split the new tree, figure out which block msg belongs to
@@ -154,22 +181,26 @@ class MPMS(PMS):
             node_ub = self.tree.search_node(1 / 2**n, 0)
             value_lb = 0
             value_ub = node_ub.start_value
-            while value_lb <= msg and value_ub <= msg:
+            while value_lb <= self.msg and value_ub <= self.msg:
                 value_lb = value_ub
                 j += 1
                 direction = 0 if self.tree.left.p < j/2**n else 1
                 value_ub = self.tree.search_node(j/2**n, 0).start_value
             
             target = j - 1 # j-th interval
-            print('value: lower bound:{}, upper bound:{}\n'.format(value_lb, value_ub))
-            if converge and abs(self.value - value_lb) < 1E-9 and i > 20:
-                
-                print("END: {}\n".format(i))
-                return self.value, i
+            #print('value: lower bound:{}, upper bound:{}\n'.format(value_lb, value_ub))
+            peak = (value_lb+value_ub) / 2
+            if rounds is None and self.check_ending(peak):
+                bin_seq = self.real_to_bin(peak)[0]
+                return bin_seq, peak, i+1
             
             # TODO: which value should be picked up
             #self.value = (value_lb + value_ub) / 2 
-            self.value = value_lb
+            #self.value = value_lb
+            self.value = peak
+            print("peak value: {}".format(peak))
 
 
-        return self.value, rounds
+        print("You have reached the maximum expected transmission rounds!")
+        bin_seq = self.real_to_bin(peak)[0]
+        return bin_seq, peak, 501

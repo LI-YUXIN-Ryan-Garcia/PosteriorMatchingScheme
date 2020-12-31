@@ -1,12 +1,24 @@
 '''
-Tree data structure for posterior matching scheme
+Tree data structure for maintaining probaility 
  - Splay tree
  - AVL tree (NA)
+
+ three functions:
+ quantile(p) -> x
+ pmf(x) -> p
+ pdf(x) -> p (NA)
 '''
+
+import bigfloat as bf
+from math import isclose
+
+tol = bf.BigFloat(1) / 10**18
 
 class Tree():
     def __init__(self, start_value, length, prob):
-        self.start_value, self.length, self.p = start_value, length, prob
+        # self.start_value, self.length, self.p = start_value, length, prob
+        self.start_value = bf.BigFloat(start_value)
+        self.length, self.p = bf.BigFloat(length), bf.BigFloat(prob)
         self.parent, self.left, self.right = None, None, None 
 
 class SplayTree(Tree):
@@ -18,29 +30,41 @@ class SplayTree(Tree):
         self.left = node
         self.right = SplayTree(node.start_value + node.length, self.length - node.length, 1 - node.p)
         self.right.parent = self
-    
-    def search_node(self, prob, direction):
-        # direction = 0 or 1: fulfill left part or right part first
-        p = prob
+
+    def quantile(self, probability):
+        p = probability
         if not self.left: # leaf
-            if direction == 0:
-                new_node = SplayTree(self.start_value, self.length * p, p)
-                self.insert(new_node)
-            else:
-                new_node = SplayTree(self.start_value, self.length * (1-p), 1-p)
-                self.insert(new_node)
+            new_node = SplayTree(self.start_value, self.length * p, p)
+            self.insert(new_node)
             return self.right
         else:
-            if direction == 0:
-                if self.left.p < p: # the left child's CDF is not enough
-                    return self.right.search_node( (p - self.left.p) / self.right.p, direction)
-                else:   # find the midddle in left
-                    return self.left.search_node( p / self.left.p, direction )
+            if isclose(self.left.p, p, abs_tol=tol):
+                return self.right
+            elif self.left.p < p: # the left child's PMF is not enough
+                return self.right.quantile( (p - self.left.p) / self.right.p )
             else:
-                if self.right.p < p:
-                    return self.left.search_node( (p - self.right.p) / self.left.p, direction)
-                else:
-                    return self.right.search_node( p / self.right.p, direction )
+                return self.left.quantile( p / self.left.p )
+
+    def PMF(self, x):
+        if isclose(self.start_value + self.length, x, abs_tol=tol):
+            return self.p
+        elif not self.left: # leaf
+            delta_len = x - self.start_value
+            if delta_len < 0:
+                print("len is negative")
+                exit()
+            new_node = SplayTree(self.start_value, delta_len, delta_len / self.length)
+            self.insert(new_node)
+            return self.p * self.left.p
+        else:
+            # if isclose(self.right.start_value,x,abs_tol=tol):
+                # return self.p * self.left.p
+            # elif isclose(self.left.start_value,x,abs_tol=tol):
+                # return 0.0
+            if self.right.start_value < x:
+                return self.p * (self.left.p + self.right.PMF(x))             
+            else:
+                return self.p * self.left.PMF(x)
 
     def zig(self): # right rotation
         # update probability
@@ -115,7 +139,10 @@ class SplayTree(Tree):
         if not self.parent.parent:
             if subtree: # root of subtree
                 return self
-            return self.zig() if self.parent.left is self else self.zag()
+            tmp = self.zig() if self.parent.left is self else self.zag()
+            # tmp.left.left.print_node()
+            return tmp
+            # return self.zig() if self.parent.left is self else self.zag()
         
         grandparent = self.parent.parent
         # grandparent, parent and child are on the same side
