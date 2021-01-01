@@ -16,7 +16,7 @@ error_probability = 0.01
 
 def test_pms(sequence, crossover_prob, error_prob):
     pms = PMS(crossover_prob)
-    s, v, r = pms.transmit(sequence, rounds=1000)
+    s, v, r = pms.transmit(sequence, rounds=20)
     print("Result:\n-rounds:{}\n-real number:{}\n-binary sequence:{}".format(r,v,s))
     print("-actual sequence:{} len: {}".format(sequence, len(sequence)))
     if s == sequence:

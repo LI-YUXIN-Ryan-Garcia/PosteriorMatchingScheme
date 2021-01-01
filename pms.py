@@ -68,7 +68,7 @@ class PMS():
         
         r = rounds if rounds is not None else 1000
         for i in range(r):
-            # np.random.seed(i)
+            np.random.seed(i)
             # encoding message
             self.X = 1 if self.msg > self.middle else 0
             # decoding message
@@ -86,6 +86,7 @@ class PMS():
             middle_node = self.tree.quantile(0.5)
             print("middle: {}".format(middle_node.start_value))
             # print("PMF of middle point {}".format(self.tree.PMF(middle_node.start_value)))
+            # self.tree.visualize()
             
             # check ending conditions
             if self.check_ending(middle_node):
@@ -98,6 +99,8 @@ class PMS():
             # find the new middle line
             self.middle = middle_node.start_value
             self.tree = middle_node.parent.rotate()
+
+            # self.tree.visualize()
         
         if self.seq is not None:
             bin_seq = self.real_to_bin(middle_node.start_value)[0]
