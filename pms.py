@@ -68,7 +68,7 @@ class PMS():
         
         r = rounds if rounds is not None else 1000
         for i in range(r):
-            # np.random.seed(i)
+            np.random.seed(i)
             # encoding message
             self.X = 1 if self.msg > self.middle else 0
             # decoding message
@@ -98,6 +98,8 @@ class PMS():
             # find the new middle line
             self.middle = middle_node.start_value
             self.tree = middle_node.parent.rotate()
+
+            # self.tree.visualize()
         
         if self.seq is not None:
             bin_seq = self.real_to_bin(middle_node.start_value)[0]

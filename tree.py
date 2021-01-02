@@ -10,6 +10,7 @@ Tree data structure for maintaining probaility
 '''
 
 import bigfloat as bf
+import matplotlib.pyplot as plt
 from math import isclose
 
 tol = bf.BigFloat(1) / 10**18
@@ -191,7 +192,27 @@ class SplayTree(Tree):
             print('Right child: {}'.format(n))
         print()
 
+    def visualize(self):
+        print("-"*80)
+        intervals = {'value':[], 'length':[], 'probability':[]}
+        self.print_intervals(intervals)
+        # print(intervals)
+        v, l, p = intervals['value'], intervals['length'], intervals['probability']
+        h = [p[i] / l[i] for i in range(len(v))]
+        plt.bar(v, h, width=l, align='edge')
+        plt.show()
+        print("-"*80 + "\n")
 
+    def print_intervals(self, intervals, parent_prob=1):
+        if self.left is None: # leaf
+            p = parent_prob * self.p
+            intervals['value'].append(self.start_value)
+            intervals['length'].append(self.length)
+            intervals['probability'].append(p)
+            # print("[{}, {}]: {}".format(self.start_value, self.start_value+self.length, p))
+        else:
+            self.left.print_intervals(intervals, parent_prob * self.p)
+            self.right.print_intervals(intervals, parent_prob * self.p)
 
 class AVLTree(Tree): # TODO
     def __init__(self, start_value, length, prob):
