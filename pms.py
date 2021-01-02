@@ -83,9 +83,9 @@ class PMS():
             # find the middle line
             # direction = 0 if self.Y == 1 else 1
             # middle_node = self.tree.search_node(0.5, direction)
-            middle_node = self.tree.quantile(0.5)
+            middle_node = self.tree.quantile(0.5, return_node=True)
             print("middle: {}".format(middle_node.start_value))
-            # print("PMF of middle point {}".format(self.tree.PMF(middle_node.start_value)))
+            print("PMF of middle point {}".format(self.tree.PMF(middle_node.start_value)))
             
             # check ending conditions
             if self.check_ending(middle_node):

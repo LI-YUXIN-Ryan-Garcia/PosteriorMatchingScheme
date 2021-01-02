@@ -31,19 +31,23 @@ class SplayTree(Tree):
         self.right = SplayTree(node.start_value + node.length, self.length - node.length, 1 - node.p)
         self.right.parent = self
 
-    def quantile(self, probability):
+    def quantile(self, probability, return_node=False):
         p = probability
         if not self.left: # leaf
-            new_node = SplayTree(self.start_value, self.length * p, p)
-            self.insert(new_node)
-            return self.right
+            if return_node:
+                new_node = SplayTree(self.start_value, self.length * p, p)
+                self.insert(new_node)
+                return self.right
+            return self.start_value + self.length * p
         else:
             if isclose(self.left.p, p, abs_tol=tol):
-                return self.right
+                if return_node:
+                    return self.right
+                return self.right.start_value
             elif self.left.p < p: # the left child's PMF is not enough
-                return self.right.quantile( (p - self.left.p) / self.right.p )
+                return self.right.quantile( (p - self.left.p) / self.right.p, return_node)
             else:
-                return self.left.quantile( p / self.left.p )
+                return self.left.quantile( p / self.left.p, return_node)
 
     def PMF(self, x):
         if isclose(self.start_value + self.length, x, abs_tol=tol):
@@ -53,9 +57,9 @@ class SplayTree(Tree):
             if delta_len < 0:
                 print("len is negative")
                 exit()
-            new_node = SplayTree(self.start_value, delta_len, delta_len / self.length)
-            self.insert(new_node)
-            return self.p * self.left.p
+            # new_node = SplayTree(self.start_value, delta_len, delta_len / self.length)
+            # self.insert(new_node)
+            return self.p * delta_len / self.length
         else:
             # if isclose(self.right.start_value,x,abs_tol=tol):
                 # return self.p * self.left.p
