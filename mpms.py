@@ -7,6 +7,16 @@ Modified Posterior Matching Scheme with hamming(4,7)
                                                            |
                             Feedback: Y1...Yn + W          |
                         <----------------------------------|
+
+*** Behaviour of the hamming code decoder
+- If no error is detected, the decoder does nothing.
+- If detected error(s) can be correct, the decoder tries to recover U even if 
+    there are more than one error. 
+- If the decoder is unable to correct detected error(s):
+    - option 1: use one more bit in feedback, indicating the receiver asks the
+        sender to transmit X again. (not very ideal)
+    - option 2: pretent the code with error(s) as a valid code and decode it
+        regardless of error(s) (not robust when code is long)
 '''
 
 import numpy as np
@@ -16,20 +26,22 @@ from pms import PMS
 from hamming import HammingCode
 
 class MPMS(PMS):
-    def __init__(self, error_prob, n):
-        self.n = n
-        super().__init__(error_prob)
-        self.value = 0
+    def __init__(self, crossover_prob, err_prob):
+        super().__init__(crossover_prob, err_prob)
+        self.peak = 0 # peak value
 
-    # return lower bound and upper bound of the prob block to be scaled up
+    # Given a bit seq, return prob' s lower\upper bound it belongs to
     def find_interval(self, y):
-        order = int(y,2)
+        order = int(y,2) # convert to integer
         n = self.n
-        # prob of intervals to be scaled down
+        if n != len(y):
+            print("ERROR! Y has invalid length:{}".format(y))
+            exit()
+        # prob of intervals to be scaled up
         unit_prob = 1 / 2**n
-        lb = order * unit_prob
-        ub = lb + unit_prob
-        return lb, ub
+        lb = bf.BigFloat(order) / 2**n
+        ub = bf.BigFloat(order + 1) / 2**n
+        return order, lb, ub
 
     def channel_transmit(self, U, num_err=None):
         a = self.XoverP
@@ -50,157 +62,118 @@ class MPMS(PMS):
             else:
                 return x
 
-        return ''.join([str(elm) for elm in list(map(flip, u,flags))])
+        return ''.join([str(elm) for elm in list(map(flip, u, flags))])
 
     # check transmission end
-    def check_ending(self, peak_value):
-        if self.seq is None:
-            if abs(self.value - peak_value) < 1E-9:
-                return True
-            else:
-                return False
-        else:
-            # boundaries of decoded real number 
-            result = self.real_to_bin(peak_value)
-            bin_seq, order= result[0], result[1]
-            l = len(bin_seq)
-            lower_bound, upper_bound = order / 2**l, (order+1) / 2**l
+    def check_ending(self):
+        v = self.peak
+        # boundaries of decoded real number 
+        bin_seq, order = self.real_to_bin(v)
+        # bounaries of pmf
+        l = len(bin_seq)
+        prob_lower_bound = bf.BigFloat(order) / 2**l
+        prob_upper_bound = bf.BigFloat(order+1) / 2**l
+        
+        p1 = self.tree.PMF(prob_lower_bound)
+        p2 = self.tree.PMF(prob_upper_bound)
+        return True if p2 - p1 > 1 - self.errP else False
 
-            # bounaries of posterior probability
-            t = self.tree
-            p = self.XoverP
-            low = t.search_node(p, direction=0)
-            upper = t.search_node(1-p, direction=0)
-            if low.start_value >= lower_bound and upper_bound >= upper.start_value:
-                return True
-            else:
-                return False
-
-    def transmit(self, msg, numErr=None, rounds=None):
-        # encode binary sequence to real number if necessary
-        self.msg = self.bin_to_real(msg)
+    def transmit(self, seq, max_channel_use=None, err_num=None):
+        self.msg = self.bin_to_real(seq)
         print("Message: {}, Pe: {}".format(self.msg, self.XoverP))
-        n = self.n
-        self.undecodable = False
+        self.n = len(seq)
+        self.peak = self.msg
+        self.undecodable = False #TODO
 
-        print("------ Start Posterior Mathcing Scheme ------")
+        print(int(self.seq, 2), len(seq))
 
-        target = round(self.msg * 2**n) # target interval
-        print('Target intervel: {}'.format(target))
+        max_default_use = 500
+        MCU = max_channel_use if max_channel_use is not None else max_default_use
+        for i in range(MCU):
+            # np.random.seed(i) debug mode
+            # split probability tree, figure out which block msg belongs to
+            msg_pmf = self.tree.PMF(self.msg)
+            msg_seq, msg_order = self.real_to_bin(msg_pmf)
+            self.X = msg_seq
 
-        r = rounds if rounds is not None else 500
-        for i in range(r):
-            #print("Round: {}".format(i))
-            # encoding message
-            self.X = format(target, '{}b'.format(n)).replace(' ', '0')
-            #print("X: {}".format(self.X))
-            
             # hamming encoding:
             h = HammingCode(self.X)
-            u = h.genCode() # msg to be send
-            #print('Sending U_1:n: {}'.format(u)) 
+            U = h.genCode() # msg to be send thru channel
 
-            # channel transmission:
-            v = self.channel_transmit(u, numErr)
-            #print('Receive V_1:n: {}'.format(v))
+            # Binary Symmetric Channel transmission:
+            v = self.channel_transmit(U, err_num)
 
             # hamming decoding:
             err_pos = h.detectError(v) # reverse order
             if err_pos == 0: # no error
                 self.Y = self.X
-            elif err_pos <= len(v): # recover u from v
+            elif err_pos <= len(v): # able to recover u from v
                 err_pos = len(v) - err_pos
-                lost_bit = 1 if v[err_pos] == '0' else 0 # flip the error bit
-                correct_v = v[:err_pos] + str(lost_bit) + v[err_pos+1:] 
-                #print("Correct code: {}".format(correct_v))
+                lost_bit = '1' if v[err_pos] == '0' else '0' # flip the error bit
+                correct_v = v[:err_pos] + lost_bit + v[err_pos+1:]
                 self.Y = h.decode(correct_v[::-1])
-            else:
-                #print("Hamming code can't correct error in {}".format(v))
+            else: #TODO
+                print("Hamming code can't correct error in {} with error position".format(v, err_pos))
                 self.undecodable = True
-                self.Y = h.decode(v)
-                continue
-            
-            #print("Y: {}".format(self.Y))
-
-            # update probability, scale up the prob block msg belongs to, and 
-            # scale down the other prob block.
-            p_lb, p_ub = self.find_interval(self.Y) # prob lower/upper bound
-            #print("probability: lower bound {}, upper bound: {}".format(p_lb, p_ub))
+                self.Y = h.decode(v) 
+                # continue      
 
             '''
-                Divide tree into three parts by lower bound and upper bound: 
-            the left part, the middle part, and the right part. Assume the err
-            prob is a, so we should scale up P([lb, ub]) by a, and scale down
-            P([0,lb], [ub,1]) by 1 - a. The procedures consist of two steps:
+                Update probability: scale up the prob block msg belongs to, and
+            scale down the other prob block. Divide tree into three parts by l-
+            ower/upper bounds of Y's interval: the left part, the middle part, 
+            and the right part. Assume the crossover probability is a, so we s-
+            hould scale up P([lb, ub]) by a, and scale down P([0,lb], [ub,1]) 
+            by 1 - a. The procedures consist of two steps:
                 1. Scale down the left part and scale up the other parts.
                 2. Scale up the middle part and scale down the right part.
                 
-                If either the left part or the right part is empty, the situa-
-            tion is the same as normal posterior matching scheme.
+                Note that if either the left part or the right part is empty, 
+            the situation is the same as standard posterior matching scheme.
             '''
-            tmp = self.tree.left.p
-            if p_lb == 0: # 1st block, similar to normal PMS
-                node_ub = self.tree.search_node(p_ub, 0)
-                self.value = node_ub.start_value
-                self.tree = node_ub.parent.rotate()
+            # probability lower/upper bounds of Y's interval
+            Y_order, Y_pmf_lb, Y_pmf_ub = self.find_interval(self.Y) 
+            if Y_order == 0: # left part is empty
+                Y_node_ub = self.tree.quantile(Y_pmf_ub)
+                self.peak = Y_node_ub.start_value
+                self.tree = Y_node_ub.parent.rotate()
                 self.tree.left.p, self.tree.right.p = 1 - self.XoverP, self.XoverP
-            elif p_ub == 1: # last blck, similar to normal PMS
-                node_lb = self.tree.search_node(p_lb, 0)
-                self.value = node_lb.start_value
-                self.tree = node_lb.parent.rotate()
+            elif Y_order == 2**self.n - 1: # right part is empty
+                Y_node_lb = self.tree.quantile(Y_pmf_lb)
+                self.peak = Y_node_lb.start_value
+                self.tree = Y_node_lb.parent.rotate()
                 self.tree.left.p, self.tree.right.p = self.XoverP, 1 - self.XoverP
             else:
-                order = int(self.Y,2) # i-th block to be scaled up, starts from 0
-                unit_prob = self.XoverP / (2**n-1)
-                remain = 2**n - 1 - order
-
-                # nodes of lower bound and upper bound
-                direction = 0 if tmp < p_lb else 1
-                node_lb = self.tree.search_node(p_lb, direction)
-                direction = 0 if tmp < p_ub else 1
-                node_ub = self.tree.search_node(p_ub, direction)
+                # nodes of lower/upper bounds of Y's interval
+                Y_node_lb = self.tree.quantile(Y_pmf_lb) 
+                Y_node_ub = self.tree.quantile(Y_pmf_ub)
+                # number of intervals in the left\right part
+                left_num = Y_order
+                right_num = 2**self.n - 1 - Y_order 
                 
+                unit_prob = bf.div(self.XoverP, (2**self.n - 1))
+                self.peak = (Y_node_lb.start_value + Y_node_ub.start_value) / 2
+
                 # step 1
-                self.tree = node_lb.parent.rotate()
-                self.tree.left.p = unit_prob * order
+                self.tree = Y_node_lb.parent.rotate()
+                self.tree.left.p = unit_prob * left_num
                 self.tree.right.p = 1 - self.tree.left.p
-
+                
                 # step 2
-                sub = node_ub.parent.rotate(subtree=True)
-                if sub.parent is not None:
-                    self.tree = sub.parent
-                    sub = self.tree.right
-                else:
-                    self.tree = sub
-                sub.left.p = sub.p * (1 - self.XoverP) / (1 - self.XoverP + unit_prob * remain)
-                sub.right.p = 1 - sub.left.p  
+                sub = self.tree.right
+                sub.parent = None
+                self.tree.right = None
+                sub = Y_node_ub.parent.rotate()
+                sub_total = 1 - self.XoverP + unit_prob * right_num
+                sub.left.p = bf.BigFloat(1 - self.XoverP) / sub_total
+                sub.right.p = 1 - sub.left.p 
+                self.tree.right = sub
+                sub.parent = self.tree
+         
+            if self.check_ending():
+                bin_seq, _ = self.real_to_bin(self.peak)
+                return bin_seq, i+1, h.l
 
-            # split the new tree, figure out which block msg belongs to
-            direction = 0 if self.tree.left.p < 1/2**n else 1
-            j = 1
-            node_ub = self.tree.search_node(1 / 2**n, 0)
-            value_lb = 0
-            value_ub = node_ub.start_value
-            while value_lb <= self.msg and value_ub <= self.msg:
-                value_lb = value_ub
-                j += 1
-                direction = 0 if self.tree.left.p < j/2**n else 1
-                value_ub = self.tree.search_node(j/2**n, 0).start_value
-            
-            target = j - 1 # j-th interval
-            #print('value: lower bound:{}, upper bound:{}\n'.format(value_lb, value_ub))
-            peak = (value_lb+value_ub) / 2
-            if rounds is None and self.check_ending(peak):
-                bin_seq = self.real_to_bin(peak)[0]
-                return bin_seq, peak, i+1
-            
-            # TODO: which value should be picked up
-            #self.value = (value_lb + value_ub) / 2 
-            #self.value = value_lb
-            self.value = peak
-            print("peak value: {}".format(peak))
-
-
-        print("You have reached the maximum expected transmission rounds!")
-        bin_seq = self.real_to_bin(peak)[0]
-        return bin_seq, peak, 501
+        bin_seq, _ = self.real_to_bin(self.peak)
+        print("You have reached the maximum expected channel use!")
+        return bin_seq, MCU, h.l

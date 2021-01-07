@@ -8,6 +8,7 @@ class HammingCode():
         self.X = data
         self.Y = receive
         self.r = self.calcRedundantBits()
+        self.l = len(data) + self.r
 
     def calcRedundantBits(self,m=None): 
         if m is None:
@@ -70,15 +71,11 @@ class HammingCode():
             for j in range(1, n + 1): 
                 if j & (2**i) == (2**i): 
                     val = val ^ int(arr[-1 * j])
-                    # print(-1 * j)
-                    # print('val = {}'.format(val)) 
 
             res = res + val*(10**i)
-            # print(res) 
 
         # Convert binary to decimal 
         err_pos = int(str(res), 2)
-        print('Error position: {}'.format(err_pos))
         return err_pos
 
     def decode(self, c=None):

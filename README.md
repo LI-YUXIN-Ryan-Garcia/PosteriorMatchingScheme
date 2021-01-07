@@ -1,3 +1,5 @@
 # PosteriorMatchingScheme
 
-# Test by run.py
+test functionality by compiling test_*.py
+
+generated graph is in /graph

@@ -11,13 +11,9 @@ Tree data structure for maintaining probaility
 
 import bigfloat as bf
 import matplotlib.pyplot as plt
-from math import isclose
-
-tol = bf.BigFloat(1) / 10**18
 
 class Tree():
     def __init__(self, start_value, length, prob):
-        # self.start_value, self.length, self.p = start_value, length, prob
         self.start_value = bf.BigFloat(start_value)
         self.length, self.p = bf.BigFloat(length), bf.BigFloat(prob)
         self.parent, self.left, self.right = None, None, None 
@@ -32,42 +28,26 @@ class SplayTree(Tree):
         self.right = SplayTree(node.start_value + node.length, self.length - node.length, 1 - node.p)
         self.right.parent = self
 
-    def quantile(self, probability, return_node=False):
+    def quantile(self, probability):
         p = probability
-        if not self.left: # leaf
-            if return_node:
-                new_node = SplayTree(self.start_value, self.length * p, p)
-                self.insert(new_node)
+        if not self.left: # leaf  
+            new_node = SplayTree(self.start_value, self.length * p, p)
+            self.insert(new_node)
+            return self.right
+        else:
+            if self.left.p - p == 0:
                 return self.right
-            return self.start_value + self.length * p
-        else:
-            if isclose(self.left.p, p, abs_tol=tol):
-                if return_node:
-                    return self.right
-                return self.right.start_value
             elif self.left.p < p: # the left child's PMF is not enough
-                return self.right.quantile( (p - self.left.p) / self.right.p, return_node)
+                return self.right.quantile( (p - self.left.p) / self.right.p)
             else:
-                return self.left.quantile( p / self.left.p, return_node)
-
+                return self.left.quantile( p / self.left.p)
+    
     def PMF(self, x):
-        if isclose(self.start_value + self.length, x, abs_tol=tol):
-            return self.p
-        elif not self.left: # leaf
-            delta_len = x - self.start_value
-            if delta_len < 0:
-                print("len is negative")
-                exit()
-            # new_node = SplayTree(self.start_value, delta_len, delta_len / self.length)
-            # self.insert(new_node)
-            return self.p * delta_len / self.length
+        if not self.left: # leaf
+            return self.p * (x-self.start_value) / self.length
         else:
-            # if isclose(self.right.start_value,x,abs_tol=tol):
-                # return self.p * self.left.p
-            # elif isclose(self.left.start_value,x,abs_tol=tol):
-                # return 0.0
             if self.right.start_value < x:
-                return self.p * (self.left.p + self.right.PMF(x))             
+                return self.p * (self.left.p + self.right.PMF(x))
             else:
                 return self.p * self.left.PMF(x)
 
@@ -144,10 +124,7 @@ class SplayTree(Tree):
         if not self.parent.parent:
             if subtree: # root of subtree
                 return self
-            tmp = self.zig() if self.parent.left is self else self.zag()
-            # tmp.left.left.print_node()
-            return tmp
-            # return self.zig() if self.parent.left is self else self.zag()
+            return self.zig() if self.parent.left is self else self.zag()
         
         grandparent = self.parent.parent
         # grandparent, parent and child are on the same side
@@ -196,7 +173,6 @@ class SplayTree(Tree):
         print("-"*80)
         intervals = {'value':[], 'length':[], 'probability':[]}
         self.print_intervals(intervals)
-        # print(intervals)
         v, l, p = intervals['value'], intervals['length'], intervals['probability']
         h = [p[i] / l[i] for i in range(len(v))]
         plt.bar(v, h, width=l, align='edge')
@@ -209,7 +185,7 @@ class SplayTree(Tree):
             intervals['value'].append(self.start_value)
             intervals['length'].append(self.length)
             intervals['probability'].append(p)
-            # print("[{}, {}]: {}".format(self.start_value, self.start_value+self.length, p))
+            print("[{}, {}]: {}".format(self.start_value, self.start_value+self.length, p))
         else:
             self.left.print_intervals(intervals, parent_prob * self.p)
             self.right.print_intervals(intervals, parent_prob * self.p)
