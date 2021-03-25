@@ -28,8 +28,8 @@ class PMS():
         return (lb+ub)/2
     
     # decode real number to binary sequence
-    def real_to_bin(self, num):
-        l = len(self.seq)
+    def real_to_bin(self, num, length):
+        l = length
         decimal = int(round(num * 2**l,2)) # 0.49999 => 0.5, 0.48999 => 0.49
         if decimal >= 2**l: # TODO potential error in MPMS
             decimal = 2**l - 1
@@ -39,27 +39,27 @@ class PMS():
     def check_ending(self, node):
         v = node.start_value
         # boundaries of decoded real number 
-        bin_seq, order = self.real_to_bin(v)
+        bin_seq, order = self.real_to_bin(v, len(self.seq))
         # bounaries of pmf
         l = len(bin_seq)
-        prob_lower_bound = bf.BigFloat(order) / 2**l
-        prob_upper_bound = bf.BigFloat(order+1) / 2**l
+        interval_lower_bound = bf.BigFloat(order) / 2**l
+        interval_upper_bound = bf.BigFloat(order+1) / 2**l
         
-        p1 = self.tree.PMF(prob_lower_bound)
-        p2 = self.tree.PMF(prob_upper_bound)
+        p1 = self.tree.PMF(interval_lower_bound)
+        p2 = self.tree.PMF(interval_upper_bound)
         return True if p2 - p1 > bf.sub(1, self.errP) else False
 
     # standard PMS transmission
     def transmit(self, seq, max_channel_use=None): 
-        self.msg = self.bin_to_real(seq)
-        # print("Message: {}, Px: {}".format(self.msg, self.XoverP))
+        self.msg_point = self.bin_to_real(seq)
+        # print("Message: {}, Px: {}".format(self.msg_point, self.XoverP))
         
         max_default_use = 500
         MCU = max_channel_use if max_channel_use is not None else max_default_use
         for i in range(MCU):
             # np.random.seed(i) # debug mode
             # encoding message
-            self.X = 1 if self.msg > self.peak else 0
+            self.X = 1 if self.msg_point > self.peak else 0
             # decoding message
             self.Y = 1 - self.X if np.random.rand() < self.XoverP else self.X
 
@@ -72,17 +72,19 @@ class PMS():
             # find the new middle point
             middle_node = self.tree.quantile(0.5)
             self.peak = middle_node.start_value
-            # print("middle: {}".format(self.peak)) # debug mode
+            # print("middle: {} {}".format(self.peak, self.tree.PMF(self.peak))) # debug mode
 
             self.tree = middle_node.parent.rotate()
+
+            # self.tree.visualize()
 
             # check ending conditions
             if self.check_ending(middle_node):
                 # self.tree.visualize() #not useful when intervals are too tiny
-                bin_seq, _ = self.real_to_bin(middle_node.start_value)
+                bin_seq, _ = self.real_to_bin(middle_node.start_value, len(self.seq))
                 return bin_seq, middle_node.start_value, i+1
 
-        bin_seq, _ = self.real_to_bin(self.peak)
+        bin_seq, _ = self.real_to_bin(self.peak, len(self.seq))
         print("You have reached the maximum expected channel uses!")
         return bin_seq, self.peak, MCU
 

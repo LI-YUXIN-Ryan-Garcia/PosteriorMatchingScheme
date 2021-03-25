@@ -9,6 +9,7 @@ Tree data structure for maintaining probaility
  pdf(x) -> p (NA)
 '''
 
+import numpy as np
 import bigfloat as bf
 import matplotlib.pyplot as plt
 
@@ -174,7 +175,7 @@ class SplayTree(Tree):
         intervals = {'value':[], 'length':[], 'probability':[]}
         self.print_intervals(intervals)
         v, l, p = intervals['value'], intervals['length'], intervals['probability']
-        h = [p[i] / l[i] for i in range(len(v))]
+        h = [bf.log(p[i] / l[i]) for i in range(len(v))]
         plt.bar(v, h, width=l, align='edge')
         plt.show()
         print("-"*80 + "\n")

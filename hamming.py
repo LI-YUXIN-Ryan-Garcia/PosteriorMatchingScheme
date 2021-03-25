@@ -3,42 +3,41 @@ Implement of Hamming Code
 '''     
 
 class HammingCode():
-
-    def __init__(self, data, receive=None):
-        self.X = data
-        self.Y = receive
-        self.r = self.calcRedundantBits()
-        self.l = len(data) + self.r
-
-    def calcRedundantBits(self,m=None): 
-        if m is None:
-            x = self.X
-            m = len(x)
+    @staticmethod
+    def calc_redundant_bits(length): 
         i = 0
-        while 2**i < m + i + 1:
+        while 2**i < length + i + 1:
             i += 1
         return i 
+    
+    def __init__(self, seq, receive=None):
+        self.X = seq
+        self.Y = receive
+        self.r = self.calc_redundant_bits(len(seq))
+        self.l = len(seq) + self.r
 
-    def genCode(self):
-        msg = self.posRedundantBits()
+    def encode(self):
+        msg = self.loc_redundant_bits()
+        # print(msg)
         msg = self.calcParityBits(msg)
+        # print(msg)
         self.code = msg
         return msg
 
-    def posRedundantBits(self):
-        data = self.X 
+    def loc_redundant_bits(self):
+        seq = self.X 
         r = self.r
         j = 0
         k = 1
-        m = len(data) 
+        m = len(seq) 
         res = '' 
 
-        for i in range(1, m + r+1): 
+        for i in range(1, m + r + 1): 
             if i == 2**j: 
                 res = res + '0'
                 j += 1
             else: 
-                res = res + data[-1 * k] 
+                res = res + seq[-1 * k] 
                 k += 1
 
         return res[::-1] 

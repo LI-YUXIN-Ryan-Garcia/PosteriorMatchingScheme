@@ -24,6 +24,7 @@ import bigfloat as bf
 from tree import SplayTree
 from pms import PMS
 from hamming import HammingCode
+from utility import hamming_err_prob, hamming_LOEP
 
 class MPMS(PMS):
     def __init__(self, crossover_prob, err_prob):
@@ -33,7 +34,7 @@ class MPMS(PMS):
     # Given a bit seq, return prob' s lower\upper bound it belongs to
     def find_interval(self, y):
         order = int(y,2) # convert to integer
-        n = self.n
+        n = self.msg_len
         if n != len(y):
             print("ERROR! Y has invalid length:{}".format(y))
             exit()
@@ -68,7 +69,7 @@ class MPMS(PMS):
     def check_ending(self):
         v = self.peak
         # boundaries of decoded real number 
-        bin_seq, order = self.real_to_bin(v)
+        bin_seq, order = self.real_to_bin(v, len(self.seq))
         # bounaries of pmf
         l = len(bin_seq)
         prob_lower_bound = bf.BigFloat(order) / 2**l
@@ -78,30 +79,42 @@ class MPMS(PMS):
         p2 = self.tree.PMF(prob_upper_bound)
         return True if p2 - p1 > 1 - self.errP else False
 
-    def transmit(self, seq, max_channel_use=None, err_num=None):
-        self.msg = self.bin_to_real(seq)
-        print("Message: {}, Pe: {}".format(self.msg, self.XoverP))
-        self.n = len(seq)
-        self.peak = self.msg
+    def transmit(self, seq, max_channel_use=None, err_num=None, msg_len=4):
+        # PMS settings
+        self.msg_point = self.bin_to_real(seq)
+        print("Message: {}, Px: {}".format(self.msg_point, self.XoverP))
+        
+        # hamming code settings
+        self.msg_len = msg_len # hamming code message length
+        self.redundant_bits = HammingCode.calc_redundant_bits(msg_len)
+        self.block_len = msg_len + self.redundant_bits
+        print("Hamming Code ({}, {})".format(self.block_len, msg_len))
         self.undecodable = False #TODO
-
-        print(int(self.seq, 2), len(seq))
+        # h_err_p = self.XoverP
+        # h_err_p = hamming_err_prob(self.XoverP, self.msg_len, self.block_len)
+        h_err_p = hamming_err_prob(self.XoverP/2, self.msg_len, self.block_len)
+        # estimated by leading order
+        # h_err_p = hamming_LOEP(self.XoverP, self.block_len) 
+        # h_err_p = 0.1179648
 
         max_default_use = 500
         MCU = max_channel_use if max_channel_use is not None else max_default_use
         for i in range(MCU):
-            # np.random.seed(i) debug mode
+            # np.random.seed(i) # debug mode
             # split probability tree, figure out which block msg belongs to
-            msg_pmf = self.tree.PMF(self.msg)
-            msg_seq, msg_order = self.real_to_bin(msg_pmf)
+            msg_pmf = self.tree.PMF(self.msg_point)
+            msg_seq, msg_order = self.real_to_bin(msg_pmf, msg_len)
             self.X = msg_seq
+            # print("X: {}".format(self.X))
 
             # hamming encoding:
             h = HammingCode(self.X)
-            U = h.genCode() # msg to be send thru channel
+            U = h.encode() # msg to be send thru channel
+            # print("U: {}".format(U))
 
             # Binary Symmetric Channel transmission:
             v = self.channel_transmit(U, err_num)
+            # print("V: {}".format(v))
 
             # hamming decoding:
             err_pos = h.detectError(v) # reverse order
@@ -113,10 +126,12 @@ class MPMS(PMS):
                 correct_v = v[:err_pos] + lost_bit + v[err_pos+1:]
                 self.Y = h.decode(correct_v[::-1])
             else: #TODO
-                print("Hamming code can't correct error in {} with error position".format(v, err_pos))
+                # print("Hamming code can't correct error in {} with error position".format(v, err_pos))
                 self.undecodable = True
-                self.Y = h.decode(v) 
-                # continue      
+                # self.Y = h.decode(v) 
+                continue    
+
+            # print("Y: {}".format(self.Y))  
 
             '''
                 Update probability: scale up the prob block msg belongs to, and
@@ -137,21 +152,21 @@ class MPMS(PMS):
                 Y_node_ub = self.tree.quantile(Y_pmf_ub)
                 self.peak = Y_node_ub.start_value
                 self.tree = Y_node_ub.parent.rotate()
-                self.tree.left.p, self.tree.right.p = 1 - self.XoverP, self.XoverP
-            elif Y_order == 2**self.n - 1: # right part is empty
+                self.tree.left.p, self.tree.right.p = 1 - h_err_p, h_err_p
+            elif Y_order == 2**self.msg_len - 1: # right part is empty
                 Y_node_lb = self.tree.quantile(Y_pmf_lb)
                 self.peak = Y_node_lb.start_value
                 self.tree = Y_node_lb.parent.rotate()
-                self.tree.left.p, self.tree.right.p = self.XoverP, 1 - self.XoverP
+                self.tree.left.p, self.tree.right.p = h_err_p, 1 - h_err_p
             else:
                 # nodes of lower/upper bounds of Y's interval
                 Y_node_lb = self.tree.quantile(Y_pmf_lb) 
                 Y_node_ub = self.tree.quantile(Y_pmf_ub)
                 # number of intervals in the left\right part
                 left_num = Y_order
-                right_num = 2**self.n - 1 - Y_order 
+                right_num = 2**self.msg_len - 1 - Y_order 
                 
-                unit_prob = bf.div(self.XoverP, (2**self.n - 1))
+                unit_prob = bf.div(h_err_p, (2**self.msg_len - 1))
                 self.peak = (Y_node_lb.start_value + Y_node_ub.start_value) / 2
 
                 # step 1
@@ -164,16 +179,19 @@ class MPMS(PMS):
                 sub.parent = None
                 self.tree.right = None
                 sub = Y_node_ub.parent.rotate()
-                sub_total = 1 - self.XoverP + unit_prob * right_num
-                sub.left.p = bf.BigFloat(1 - self.XoverP) / sub_total
+                sub_total = 1 - h_err_p + unit_prob * right_num
+                sub.left.p = bf.BigFloat(1 - h_err_p) / sub_total
                 sub.right.p = 1 - sub.left.p 
                 self.tree.right = sub
                 sub.parent = self.tree
+            # print("-"*80)
+
+            # self.tree.visualize()
          
             if self.check_ending():
-                bin_seq, _ = self.real_to_bin(self.peak)
-                return bin_seq, i+1, h.l
+                bin_seq, _ = self.real_to_bin(self.peak, len(self.seq))
+                return bin_seq, i+1, self.block_len
 
-        bin_seq, _ = self.real_to_bin(self.peak)
+        bin_seq, _ = self.real_to_bin(self.peak, len(self.seq))
         print("You have reached the maximum expected channel use!")
-        return bin_seq, MCU, h.l
+        return bin_seq, MCU, self.block_len
